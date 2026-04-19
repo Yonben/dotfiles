@@ -36,6 +36,7 @@ log_info "Starting package installation"
 PACKAGE_MANAGER="$(select_package_manager || true)"
 APT_REQUIRED_PACKAGES="zsh git fzf zoxide bat eza"
 APT_BEST_EFFORT_PACKAGES="starship"
+BREW_REQUIRED_PACKAGES="zsh git fzf zoxide bat eza starship"
 FOLLOW_UP_COMMANDS=""
 
 append_follow_up() {
@@ -58,6 +59,28 @@ print_follow_ups() {
 
   printf '%s\n' "Follow-up:"
   printf '%s\n' "$FOLLOW_UP_COMMANDS"
+}
+
+install_brew_package() {
+  package="$1"
+
+  log_info "Attempting Homebrew package install: $package"
+  set +e
+  output="$(brew install "$package" 2>&1)"
+  status=$?
+  set -e
+
+  if [ -n "$output" ]; then
+    printf '%s\n' "$output"
+  fi
+
+  if [ "$status" -eq 0 ]; then
+    log_done "Installed Homebrew package: $package"
+    return 0
+  fi
+
+  log_warn "Homebrew install failed for package: $package"
+  return 1
 }
 
 apt_permission_denied() {
@@ -142,8 +165,24 @@ install_apt_package() {
 }
 
 if [ "$PACKAGE_MANAGER" = "brew" ]; then
-  PACKAGES="$APT_REQUIRED_PACKAGES $APT_BEST_EFFORT_PACKAGES"
-  brew install $PACKAGES
+  if is_macos; then
+    log_info "Selected package manager: Homebrew on macOS"
+  else
+    log_info "Selected package manager: Homebrew"
+  fi
+
+  missing_brew_packages=""
+  for package in $BREW_REQUIRED_PACKAGES; do
+    if ! install_brew_package "$package"; then
+      missing_brew_packages="${missing_brew_packages}${missing_brew_packages:+ }$package"
+    fi
+  done
+
+  if [ -n "$missing_brew_packages" ]; then
+    log_fail "Required Homebrew packages remain unavailable: $missing_brew_packages"
+    exit 1
+  fi
+
   exit 0
 fi
 
@@ -176,4 +215,14 @@ if [ "$PACKAGE_MANAGER" = "apt-get" ]; then
   exit 0
 fi
 
-echo "No supported package manager found; skipping package installation."
+if is_macos; then
+  log_fail "Automatic package installation is unavailable: Homebrew was not found on macOS"
+  append_follow_up "Install Homebrew from https://brew.sh and rerun ./bin/install-packages"
+else
+  log_fail "Automatic package installation is unavailable: no supported package manager was found"
+  append_follow_up "Install the required packages manually: zsh git fzf zoxide bat eza starship"
+fi
+
+log_warn "Cannot continue with automatic package installation on this platform"
+print_follow_ups
+exit 1
