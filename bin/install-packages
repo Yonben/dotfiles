@@ -5,17 +5,42 @@ log_info() { printf '%s\n' "[info] $*"; }
 log_done() { printf '%s\n' "[done] $*"; }
 log_warn() { printf '%s\n' "[warn] $*"; }
 log_fail() { printf '%s\n' "[fail] $*"; }
+is_macos() { [ "$(uname -s)" = "Darwin" ]; }
+is_linux() { [ "$(uname -s)" = "Linux" ]; }
+has_command() { command -v "$1" >/dev/null 2>&1; }
+
+select_package_manager() {
+  if is_macos && has_command brew; then
+    printf '%s\n' brew
+    return 0
+  fi
+
+  if is_linux; then
+    if has_command apt-get; then
+      printf '%s\n' apt-get
+      return 0
+    fi
+
+    if has_command brew; then
+      printf '%s\n' brew
+      return 0
+    fi
+  fi
+
+  return 1
+}
 
 log_info "Starting package installation"
 
 PACKAGES="zsh git fzf zoxide bat eza starship"
+PACKAGE_MANAGER="$(select_package_manager || true)"
 
-if command -v brew >/dev/null 2>&1; then
+if [ "$PACKAGE_MANAGER" = "brew" ]; then
   brew install $PACKAGES
   exit 0
 fi
 
-if command -v apt-get >/dev/null 2>&1; then
+if [ "$PACKAGE_MANAGER" = "apt-get" ]; then
   for package in $PACKAGES; do
     apt-get install -y "$package" || echo "Skipping unavailable apt package: $package"
   done
