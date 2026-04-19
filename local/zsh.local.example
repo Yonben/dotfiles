@@ -1,0 +1,5 @@
+# Machine-specific PATH additions
+# export PATH="$HOME/.local/bin:$PATH"
+
+# Machine-specific aliases
+# alias ll='ls -la'

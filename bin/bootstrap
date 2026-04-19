@@ -1,0 +1,48 @@
+#!/usr/bin/env sh
+set -eu
+
+DOTFILES_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+backup_target() {
+  target="$1"
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    mv "$target" "$target.backup.$(date +%Y%m%d%H%M%S)"
+  fi
+}
+
+link_file() {
+  source_path="$1"
+  target_path="$2"
+
+  mkdir -p "$(dirname "$target_path")"
+
+  if [ -L "$target_path" ] && [ "$(readlink "$target_path")" = "$source_path" ]; then
+    return 0
+  fi
+
+  if [ -e "$target_path" ] || [ -L "$target_path" ]; then
+    backup_target "$target_path"
+  fi
+
+  ln -s "$source_path" "$target_path"
+}
+
+seed_local_file() {
+  example_path="$1"
+  local_path="$2"
+
+  if [ ! -e "$local_path" ]; then
+    cp "$example_path" "$local_path"
+  fi
+}
+
+seed_local_file "$DOTFILES_DIR/local/zsh.local.example" "$DOTFILES_DIR/local/zsh.local"
+seed_local_file "$DOTFILES_DIR/local/gitconfig.local.example" "$DOTFILES_DIR/local/gitconfig.local"
+
+link_file "$DOTFILES_DIR/zsh/.zshrc" "$HOME/.zshrc"
+link_file "$DOTFILES_DIR/git/.gitconfig" "$HOME/.gitconfig"
+link_file "$DOTFILES_DIR/starship/starship.toml" "$HOME/.config/starship.toml"
+
+if [ "${1:-}" = "--install" ]; then
+  "$DOTFILES_DIR/bin/install-packages"
+fi

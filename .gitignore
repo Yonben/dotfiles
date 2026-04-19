@@ -1,0 +1,5 @@
+local/gitconfig.local
+local/zsh.local
+*.bak
+*.backup
+docs/

@@ -1,0 +1,5 @@
+[push]
+    autoSetupRemote = true
+
+[include]
+    path = ~/dotfiles/local/gitconfig.local

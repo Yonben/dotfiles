@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+set -eu
+
+PACKAGES="zsh git fzf zoxide bat eza starship"
+
+if command -v brew >/dev/null 2>&1; then
+  brew install $PACKAGES
+  exit 0
+fi
+
+if command -v apt-get >/dev/null 2>&1; then
+  for package in $PACKAGES; do
+    apt-get install -y "$package" || echo "Skipping unavailable apt package: $package"
+  done
+  exit 0
+fi
+
+echo "No supported package manager found; skipping package installation."
