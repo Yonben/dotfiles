@@ -10,6 +10,69 @@ is_linux() { [ "$(uname -s)" = "Linux" ]; }
 has_command() { command -v "$1" >/dev/null 2>&1; }
 is_root() { [ "$(id -u)" -eq 0 ]; }
 
+assert_contains() {
+  haystack="$1"
+  needle="$2"
+  if printf '%s' "$haystack" | grep -F -- "$needle" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  printf '%s\n' "missing expected output: $needle" >&2
+  return 1
+}
+
+assert_not_contains() {
+  haystack="$1"
+  needle="$2"
+  if printf '%s' "$haystack" | grep -F -- "$needle" >/dev/null 2>&1; then
+    printf '%s\n' "unexpected output present: $needle" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+assert_occurrences() {
+  haystack="$1"
+  needle="$2"
+  expected_count="$3"
+  actual_count="$(printf '%s' "$haystack" | grep -F -c -- "$needle" || true)"
+
+  if [ "$actual_count" -eq "$expected_count" ]; then
+    return 0
+  fi
+
+  printf '%s\n' "expected $expected_count occurrences of: $needle (found $actual_count)" >&2
+  return 1
+}
+
+run_self_test() {
+  case "${2:-}" in
+    follow-up-checklist)
+      output="$(
+        INSTALL_PACKAGES_SELF_TEST_SCENARIO="follow-up-checklist" \
+          sh "$0" 2>&1 || true
+      )"
+      assert_contains "$output" "Before you finish setup, review these follow-up steps:"
+      assert_occurrences "$output" "Before you finish setup, review these follow-up steps:" 1
+      assert_contains "$output" "- If you want your user shell to default to zsh, run: chsh -s \"\$(command -v zsh)\""
+      assert_contains "$output" "- If apt still cannot find required packages, enable the Ubuntu universe repository, refresh apt metadata, and rerun the installer: sudo add-apt-repository -y universe && sudo apt update"
+      assert_contains "$output" "- If you want the prompt theme now, install starship manually: curl -sS https://starship.rs/install.sh | sh"
+      assert_contains "$output" "- If package installation needed elevated privileges, rerun the installer as root: sudo ./bin/install-packages"
+      assert_not_contains "$output" "Follow-up:"
+      return 0
+      ;;
+  esac
+
+  printf '%s\n' "unknown self-test: ${2:-}" >&2
+  return 1
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+  run_self_test "$@"
+  exit $?
+fi
+
 select_package_manager() {
   if is_macos && has_command brew; then
     printf '%s\n' brew
@@ -37,29 +100,65 @@ PACKAGE_MANAGER="$(select_package_manager || true)"
 APT_REQUIRED_PACKAGES="zsh git fzf zoxide bat eza"
 APT_BEST_EFFORT_PACKAGES="starship"
 BREW_REQUIRED_PACKAGES="zsh git fzf zoxide bat eza starship"
-FOLLOW_UP_COMMANDS=""
+FOLLOW_UPS_FILE="$(mktemp "${TMPDIR:-/tmp}/install-packages-follow-ups.XXXXXX")"
 
-append_follow_up() {
-  command="$1"
-  case "
-$FOLLOW_UP_COMMANDS
-" in
-    *"
-$command
-"*) ;;
-    *)
-      FOLLOW_UP_COMMANDS="${FOLLOW_UP_COMMANDS}${FOLLOW_UP_COMMANDS:+
-}$command"
+cleanup() {
+  rm -f "$FOLLOW_UPS_FILE"
+}
+
+trap cleanup EXIT HUP INT TERM
+
+add_follow_up() {
+  printf '%s\n' "$1" >> "$FOLLOW_UPS_FILE"
+}
+
+add_shell_follow_up() {
+  add_follow_up 'If you want your user shell to default to zsh, run: chsh -s "$(command -v zsh)"'
+}
+
+add_root_rerun_follow_up() {
+  add_follow_up "If package installation needed elevated privileges, rerun the installer as root: sudo ./bin/install-packages"
+}
+
+add_universe_follow_up() {
+  add_follow_up "If apt still cannot find required packages, enable the Ubuntu universe repository, refresh apt metadata, and rerun the installer: sudo add-apt-repository -y universe && sudo apt update"
+}
+
+add_starship_follow_up() {
+  add_follow_up "If you want the prompt theme now, install starship manually: curl -sS https://starship.rs/install.sh | sh"
+}
+
+print_follow_ups() {
+  [ -s "$FOLLOW_UPS_FILE" ] || return 0
+
+  printf '%s\n' "Before you finish setup, review these follow-up steps:"
+  sort -u "$FOLLOW_UPS_FILE" | while IFS= read -r follow_up || [ -n "$follow_up" ]; do
+    [ -n "$follow_up" ] || continue
+    printf '%s\n' "- $follow_up"
+  done
+}
+
+finish() {
+  status="$1"
+  print_follow_ups
+  exit "$status"
+}
+
+run_self_test_scenario() {
+  case "${INSTALL_PACKAGES_SELF_TEST_SCENARIO:-}" in
+    follow-up-checklist)
+      add_shell_follow_up
+      add_universe_follow_up
+      add_starship_follow_up
+      add_root_rerun_follow_up
+      print_follow_ups
+      exit 0
       ;;
   esac
 }
 
-print_follow_ups() {
-  [ -n "$FOLLOW_UP_COMMANDS" ] || return 0
-
-  printf '%s\n' "Follow-up:"
-  printf '%s\n' "$FOLLOW_UP_COMMANDS"
-}
+add_shell_follow_up
+run_self_test_scenario
 
 install_brew_package() {
   package="$1"
@@ -80,6 +179,9 @@ install_brew_package() {
   fi
 
   log_warn "Homebrew install failed for package: $package"
+  if [ "$package" = "starship" ]; then
+    add_starship_follow_up
+  fi
   return 1
 }
 
@@ -143,23 +245,23 @@ install_apt_package() {
 
   if apt_permission_denied "$output"; then
     log_warn "Insufficient privileges to install apt package: $package"
-    append_follow_up "sudo ./bin/install-packages"
+    add_root_rerun_follow_up
     return 1
   fi
 
   if apt_missing_package "$output"; then
     log_warn "Apt package is unavailable: $package"
     if [ "$package" = "starship" ]; then
-      append_follow_up "curl -sS https://starship.rs/install.sh | sh"
+      add_starship_follow_up
     else
-      append_follow_up "sudo add-apt-repository -y universe && sudo apt update"
+      add_universe_follow_up
     fi
     return 1
   fi
 
   log_warn "Apt install failed for $package"
   if [ "$required" = "required" ]; then
-    append_follow_up "sudo ./bin/install-packages"
+    add_root_rerun_follow_up
   fi
   return 1
 }
@@ -180,10 +282,10 @@ if [ "$PACKAGE_MANAGER" = "brew" ]; then
 
   if [ -n "$missing_brew_packages" ]; then
     log_fail "Required Homebrew packages remain unavailable: $missing_brew_packages"
-    exit 1
+    finish 1
   fi
 
-  exit 0
+  finish 0
 fi
 
 if [ "$PACKAGE_MANAGER" = "apt-get" ]; then
@@ -207,22 +309,19 @@ if [ "$PACKAGE_MANAGER" = "apt-get" ]; then
 
   if [ -n "$missing_required_packages" ]; then
     log_fail "Required apt packages remain unavailable: $missing_required_packages"
-    print_follow_ups
-    exit 1
+    finish 1
   fi
 
-  print_follow_ups
-  exit 0
+  finish 0
 fi
 
 if is_macos; then
   log_fail "Automatic package installation is unavailable: Homebrew was not found on macOS"
-  append_follow_up "Install Homebrew from https://brew.sh and rerun ./bin/install-packages"
+  add_follow_up "Install Homebrew from https://brew.sh, then rerun ./bin/install-packages to install the required packages automatically"
 else
   log_fail "Automatic package installation is unavailable: no supported package manager was found"
-  append_follow_up "Install the required packages manually: zsh git fzf zoxide bat eza starship"
+  add_follow_up "Install the required packages manually: zsh git fzf zoxide bat eza starship"
 fi
 
 log_warn "Cannot continue with automatic package installation on this platform"
-print_follow_ups
-exit 1
+finish 1
