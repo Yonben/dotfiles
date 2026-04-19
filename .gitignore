@@ -2,4 +2,4 @@ local/gitconfig.local
 local/zsh.local
 *.bak
 *.backup
-docs/
+docs/superpowers/plans/
