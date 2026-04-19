@@ -63,7 +63,7 @@ print_follow_ups() {
 apt_permission_denied() {
   output="$1"
   case "$output" in
-    *"Permission denied"*|*"are you root"*|*"Could not open lock file"*)
+    *"Permission denied"*|*"are you root"*|*"Could not open lock file"*|*"Unable to acquire the dpkg frontend lock"*)
       return 0
       ;;
   esac
@@ -89,7 +89,19 @@ apt_refresh_metadata_if_needed() {
   fi
 
   log_info "Refreshing apt package metadata"
-  apt-get update
+  set +e
+  output="$(apt-get update 2>&1)"
+  status=$?
+  set -e
+
+  if [ "$status" -eq 0 ]; then
+    return 0
+  fi
+
+  printf '%s\n' "$output" >&2
+  log_warn "Apt metadata refresh failed"
+  append_follow_up "sudo add-apt-repository -y universe && sudo apt update"
+  return 1
 }
 
 install_apt_package() {
@@ -139,7 +151,9 @@ fi
 if [ "$PACKAGE_MANAGER" = "apt-get" ]; then
   missing_required_packages=""
 
-  apt_refresh_metadata_if_needed
+  if ! apt_refresh_metadata_if_needed; then
+    log_warn "Continuing with apt package installation despite metadata refresh failure"
+  fi
 
   for package in $APT_REQUIRED_PACKAGES; do
     if ! install_apt_package "$package" required; then
