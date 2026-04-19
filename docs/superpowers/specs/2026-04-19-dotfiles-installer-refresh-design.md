@@ -54,6 +54,13 @@ Responsibilities:
 - optionally delegate package installation when invoked with `--install`
 - print a final follow-up checklist for user-run actions
 
+Privilege behavior for `--install`:
+
+- `bin/bootstrap --install` should always perform the user-level bootstrap work first
+- it may invoke `bin/install-packages` directly after that
+- it must not attempt to self-escalate with `sudo`
+- if package installation requires root and the user is not root, it should print an explicit follow-up command such as `sudo ./bin/install-packages`
+
 `bin/bootstrap` should not:
 
 - run `chsh`
@@ -75,6 +82,11 @@ Responsibilities:
 
 ## Linux Strategy
 
+Package-manager precedence on Linux:
+
+- if `apt-get` is present, prefer the `apt` path even if Linux Homebrew is also installed
+- Linux Homebrew should not override the Ubuntu-first behavior unless explicitly added later as a separate design choice
+
 ### Ubuntu-First Behavior
 
 When `apt-get` is present:
@@ -83,8 +95,11 @@ When `apt-get` is present:
 - optionally run `apt update` when appropriate for package install flow
 - attempt installation package-by-package so one failure does not abort the whole process
 - treat known package-manager failures separately from package absence
+- if package availability looks incomplete, print the exact `universe` enable command as a follow-up instead of enabling it automatically
 
 The initial expected apt package set is:
+
+Required:
 
 - `zsh`
 - `git`
@@ -93,7 +108,11 @@ The initial expected apt package set is:
 - `bat`
 - `eza`
 
-`starship` should not be assumed to be available from apt. If it is not installable through the detected package manager path, it should be moved to the follow-up checklist rather than treated like a normal successful install target.
+Best-effort follow-up:
+
+- `starship`
+
+`starship` should not be assumed to be available from apt. If it is not installable through the detected package manager path, it should be moved to the follow-up checklist rather than treated like a failed required package.
 
 ### Linux Fallback Behavior
 
@@ -110,6 +129,18 @@ When Homebrew is present:
 - install the supported package list through `brew`
 - log package attempts and results clearly
 - preserve the current simple macOS path
+
+The expected Homebrew package set is:
+
+Required:
+
+- `zsh`
+- `git`
+- `fzf`
+- `zoxide`
+- `bat`
+- `eza`
+- `starship`
 
 If Homebrew is missing:
 
@@ -143,6 +174,12 @@ The output should feel intentional and easy on the eyes, but stay ASCII-only and
 
 ## Follow-Up Checklist
 
+`bin/install-packages` should be the canonical owner of install-related follow-up output.
+
+- when `bin/install-packages` runs directly, it prints its own final follow-up checklist
+- when `bin/bootstrap --install` delegates to `bin/install-packages`, bootstrap should not duplicate the installer checklist
+- `bin/bootstrap` may still print bootstrap-specific follow-ups if needed, but install-related follow-ups should come from `bin/install-packages`
+
 At the end of install/bootstrap, print a final flat checklist for actions the script did not run automatically.
 
 This includes at least:
@@ -168,6 +205,22 @@ The refreshed installer should distinguish:
 
 In particular, a non-root `apt-get` permission error should not be mislabeled as “package unavailable.”
 
+## Exit Status Contract
+
+`bin/install-packages` should:
+
+- exit `0` when all required automatic install work completed successfully
+- exit non-zero when there are actionable install problems such as insufficient privileges, missing setup prerequisites, or package-manager failures that require user action
+- still print follow-up guidance before exiting non-zero where possible
+
+`bin/bootstrap --install` should:
+
+- always complete the user-level bootstrap work first
+- invoke `bin/install-packages` if requested
+- continue to print follow-up guidance even if installation reports actionable problems
+- exit `0` if the user-level bootstrap work succeeded, even when `bin/install-packages` reported actionable problems
+- surface installer issues clearly in logs while relying on `bin/install-packages` to print install-related follow-up commands
+
 ## README Updates
 
 The README should document the intended server flow more clearly:
@@ -180,6 +233,7 @@ sudo ./bin/install-packages
 It should also document:
 
 - `./bin/bootstrap --install` as a convenience path
+- that `./bin/bootstrap --install` does not self-escalate and may print `sudo ./bin/install-packages` when root is required
 - that the scripts may print follow-up commands instead of running every action automatically
 - that shell-default changes are suggested, not enforced
 
@@ -200,6 +254,8 @@ The implementation should be validated with checks for:
 - readable progress output during bootstrap
 - readable progress output during package installation
 - non-root apt permission errors produce correct messaging
+- `bootstrap --install` on Linux preserves user-level bootstrap work and then prints the correct `sudo ./bin/install-packages` follow-up when root is required
+- likely-missing Ubuntu repo coverage produces a `universe` follow-up command instead of automatic repo modification
 - apt package failures do not abort the entire install flow
 - macOS/Homebrew path still works as expected
 - follow-up checklist prints the expected `chsh` guidance
