@@ -29,7 +29,31 @@ if command -v eza >/dev/null 2>&1; then
 fi
 
 if command -v fzf >/dev/null 2>&1; then
-  eval "$(fzf --zsh)"
+  if fzf --zsh >/dev/null 2>&1; then
+    eval "$(fzf --zsh)"
+  else
+    for fzf_base in \
+      "${FZF_BASE:-}" \
+      /usr/share/fzf \
+      /usr/local/share/fzf \
+      /opt/homebrew/opt/fzf/shell \
+      /usr/share/doc/fzf/examples
+    do
+      [ -n "$fzf_base" ] || continue
+
+      if [ -f "$fzf_base/key-bindings.zsh" ]; then
+        . "$fzf_base/key-bindings.zsh"
+      fi
+
+      if [ -f "$fzf_base/completion.zsh" ]; then
+        . "$fzf_base/completion.zsh"
+      fi
+
+      if [ -f "$fzf_base/key-bindings.zsh" ] || [ -f "$fzf_base/completion.zsh" ]; then
+        break
+      fi
+    done
+  fi
 fi
 
 if command -v zoxide >/dev/null 2>&1; then
