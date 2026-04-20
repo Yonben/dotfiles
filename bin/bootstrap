@@ -3,10 +3,51 @@ set -eu
 
 DOTFILES_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
+log_info() { printf '%s\n' "[info] $*"; }
+log_done() { printf '%s\n' "[done] $*"; }
+log_warn() { printf '%s\n' "[warn] $*"; }
+log_fail() { printf '%s\n' "[fail] $*"; }
+
+assert_contains() {
+  haystack="$1"
+  needle="$2"
+  if printf '%s' "$haystack" | grep -F -- "$needle" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  printf '%s\n' "missing expected output: $needle" >&2
+  return 1
+}
+
+assert_occurrences() {
+  haystack="$1"
+  needle="$2"
+  expected_count="$3"
+  actual_count="$(printf '%s' "$haystack" | grep -F -c -- "$needle" || true)"
+
+  if [ "$actual_count" -eq "$expected_count" ]; then
+    return 0
+  fi
+
+  printf '%s\n' "expected $expected_count occurrences of: $needle (found $actual_count)" >&2
+  return 1
+}
+
+cleanup_dir() {
+  rm -rf "$1"
+}
+
+print_shell_follow_up() {
+  printf '%s\n' "Before you finish setup, review this follow-up step:"
+  printf '%s\n' '- If you want your user shell to default to zsh, run: chsh -s "$(command -v zsh)"'
+}
+
 backup_target() {
   target="$1"
   if [ -e "$target" ] || [ -L "$target" ]; then
-    mv "$target" "$target.backup.$(date +%Y%m%d%H%M%S)"
+    backup_path="$target.backup.$(date +%Y%m%d%H%M%S)"
+    mv "$target" "$backup_path"
+    log_warn "Created backup: $target -> $backup_path"
   fi
 }
 
@@ -17,6 +58,7 @@ link_file() {
   mkdir -p "$(dirname "$target_path")"
 
   if [ -L "$target_path" ] && [ "$(readlink "$target_path")" = "$source_path" ]; then
+    log_info "Skipping existing link: $target_path"
     return 0
   fi
 
@@ -25,6 +67,7 @@ link_file() {
   fi
 
   ln -s "$source_path" "$target_path"
+  log_done "Linked $target_path -> $source_path"
 }
 
 seed_local_file() {
@@ -33,16 +76,99 @@ seed_local_file() {
 
   if [ ! -e "$local_path" ]; then
     cp "$example_path" "$local_path"
+    log_done "Seeded local file: $local_path"
   fi
 }
 
-seed_local_file "$DOTFILES_DIR/local/zsh.local.example" "$DOTFILES_DIR/local/zsh.local"
-seed_local_file "$DOTFILES_DIR/local/gitconfig.local.example" "$DOTFILES_DIR/local/gitconfig.local"
+run_progress_output_self_test() {
+  tmp_home="$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-progress.XXXXXX")"
 
-link_file "$DOTFILES_DIR/zsh/.zshrc" "$HOME/.zshrc"
-link_file "$DOTFILES_DIR/git/.gitconfig" "$HOME/.gitconfig"
-link_file "$DOTFILES_DIR/starship/starship.toml" "$HOME/.config/starship.toml"
+  output="$(HOME="$tmp_home" "$0" 2>&1)"
 
-if [ "${1:-}" = "--install" ]; then
-  "$DOTFILES_DIR/bin/install-packages"
+  assert_contains "$output" "[info] Starting bootstrap"
+  assert_contains "$output" "[done] Linked $tmp_home/.zshrc -> $DOTFILES_DIR/zsh/.zshrc"
+  assert_contains "$output" "[done] Linked $tmp_home/.gitconfig -> $DOTFILES_DIR/git/.gitconfig"
+  assert_contains "$output" "[done] Linked $tmp_home/.config/starship.toml -> $DOTFILES_DIR/starship/starship.toml"
+  assert_contains "$output" 'Before you finish setup, review this follow-up step:'
+  assert_contains "$output" '- If you want your user shell to default to zsh, run: chsh -s "$(command -v zsh)"'
+
+  cleanup_dir "$tmp_home"
+}
+
+run_install_delegation_self_test() {
+  tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-install.XXXXXX")"
+  tmp_home="$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-home.XXXXXX")"
+
+  mkdir -p "$tmp_root/bin"
+  cat > "$tmp_root/bin/uname" <<'EOF'
+#!/usr/bin/env sh
+echo Linux
+EOF
+  cat > "$tmp_root/bin/apt-get" <<'EOF'
+#!/usr/bin/env sh
+[ "$1" = "update" ] && exit 0
+echo 'E: Could not open lock file /var/lib/dpkg/lock-frontend - open (13: Permission denied)' >&2
+exit 100
+EOF
+  chmod +x "$tmp_root/bin/uname" "$tmp_root/bin/apt-get"
+
+  output="$(
+    PATH="$tmp_root/bin:/usr/bin:/bin" \
+      HOME="$tmp_home" \
+      "$0" --install 2>&1
+  )"
+
+  test -L "$tmp_home/.zshrc"
+  test -L "$tmp_home/.gitconfig"
+  test -L "$tmp_home/.config/starship.toml"
+  assert_contains "$output" "[warn] Package installation reported actionable issues"
+  assert_contains "$output" "sudo ./bin/install-packages"
+  assert_occurrences "$output" "Before you finish setup, review these follow-up steps:" 1
+  assert_occurrences "$output" 'chsh -s "$(command -v zsh)"' 1
+
+  cleanup_dir "$tmp_root"
+  cleanup_dir "$tmp_home"
+}
+
+run_self_test() {
+  case "${2:-}" in
+    progress-output)
+      run_progress_output_self_test
+      ;;
+    install-delegation)
+      run_install_delegation_self_test
+      ;;
+    *)
+      printf '%s\n' "unknown self-test: ${2:-}" >&2
+      return 1
+      ;;
+  esac
+}
+
+main() {
+  log_info "Starting bootstrap"
+
+  seed_local_file "$DOTFILES_DIR/local/zsh.local.example" "$DOTFILES_DIR/local/zsh.local"
+  seed_local_file "$DOTFILES_DIR/local/gitconfig.local.example" "$DOTFILES_DIR/local/gitconfig.local"
+
+  link_file "$DOTFILES_DIR/zsh/.zshrc" "$HOME/.zshrc"
+  link_file "$DOTFILES_DIR/git/.gitconfig" "$HOME/.gitconfig"
+  link_file "$DOTFILES_DIR/starship/starship.toml" "$HOME/.config/starship.toml"
+
+  if [ "${1:-}" = "--install" ]; then
+    if ! "$DOTFILES_DIR/bin/install-packages"; then
+      log_warn "Package installation reported actionable issues"
+    fi
+  else
+    print_shell_follow_up
+  fi
+
+  log_done "Bootstrap complete"
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+  run_self_test "$@"
+  exit $?
 fi
+
+main "$@"
