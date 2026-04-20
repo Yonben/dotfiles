@@ -31,18 +31,28 @@ Plugin code lives under the repo at:
 
 These directories are managed by repo scripts rather than committed plugin source. This keeps the repo lightweight while still giving the shell a predictable load path.
 
+`zsh/plugins/` must be ignored by git except for a tracked placeholder such as `zsh/plugins/.gitkeep`.
+
 ### Installation Flow
 
-`bin/install-packages` gains a plugin installation phase after package installation.
+`bin/bootstrap` gains a user-owned plugin installation phase via a dedicated helper such as `bin/install-zsh-plugins`.
 
 Behavior:
 
+- plugin cloning runs as the user, not through `sudo ./bin/install-packages`
 - if `git` is available, clone each plugin into its target directory when missing
 - if a plugin directory already exists, skip it rather than updating in place
 - if cloning fails because of network or git issues, log a warning and add a manual follow-up command
-- plugin installation should not break the rest of the bootstrap flow if package installation has otherwise succeeded
+- plugin installation should not break the rest of the bootstrap flow
+- package installation remains in `bin/install-packages`
 
 The script should print readable progress logs consistent with the current installer style.
+
+Plugin source policy:
+
+- `zsh-autosuggestions` installs from `https://github.com/zsh-users/zsh-autosuggestions`
+- `fast-syntax-highlighting` installs from `https://github.com/zdharma-continuum/fast-syntax-highlighting`
+- installs use shallow clones and do not auto-update existing plugin directories
 
 ### Zsh Loading
 
@@ -78,8 +88,9 @@ Functions:
 
 - prefer local `main` when present
 - otherwise prefer local `master` when present
-- otherwise detect the remote default branch when available
+- otherwise use `refs/remotes/origin/HEAD` via `git symbolic-ref --short`
 - otherwise fail with a readable error
+- fail cleanly outside a git repository
 
 `gcm()` should check out the branch returned by `git_main_branch()`.
 

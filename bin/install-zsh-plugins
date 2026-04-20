@@ -1,0 +1,104 @@
+#!/usr/bin/env sh
+set -eu
+
+DOTFILES_DIR_DEFAULT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+DOTFILES_DIR="${DOTFILES_DIR_OVERRIDE:-$DOTFILES_DIR_DEFAULT}"
+PLUGINS_DIR="$DOTFILES_DIR/zsh/plugins"
+FOLLOW_UPS_FILE="$(mktemp "${TMPDIR:-/tmp}/install-zsh-plugins-follow-ups.XXXXXX")"
+
+log_info() { printf '%s\n' "[info] $*"; }
+log_done() { printf '%s\n' "[done] $*"; }
+log_warn() { printf '%s\n' "[warn] $*"; }
+log_fail() { printf '%s\n' "[fail] $*"; }
+has_command() { command -v "$1" >/dev/null 2>&1; }
+
+cleanup() {
+  rm -f "$FOLLOW_UPS_FILE"
+}
+
+trap cleanup EXIT HUP INT TERM
+
+add_follow_up() {
+  printf '%s\n' "$1" >> "$FOLLOW_UPS_FILE"
+}
+
+print_follow_ups() {
+  [ -s "$FOLLOW_UPS_FILE" ] || return 0
+
+  printf '%s\n' "Before you finish setup, review these follow-up steps:"
+  sort -u "$FOLLOW_UPS_FILE" | while IFS= read -r follow_up || [ -n "$follow_up" ]; do
+    [ -n "$follow_up" ] || continue
+    printf '%s\n' "- $follow_up"
+  done
+}
+
+plugin_repo_url() {
+  case "$1" in
+    zsh-autosuggestions)
+      printf '%s\n' "https://github.com/zsh-users/zsh-autosuggestions"
+      ;;
+    fast-syntax-highlighting)
+      printf '%s\n' "https://github.com/zdharma-continuum/fast-syntax-highlighting"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+plugin_clone_command() {
+  plugin_name="$1"
+  plugin_dir="$PLUGINS_DIR/$plugin_name"
+  plugin_repo="$(plugin_repo_url "$plugin_name")"
+  printf '%s\n' "git clone --depth 1 $plugin_repo \"$plugin_dir\""
+}
+
+install_plugin() {
+  plugin_name="$1"
+  plugin_dir="$PLUGINS_DIR/$plugin_name"
+  plugin_repo="$(plugin_repo_url "$plugin_name")"
+
+  if [ -d "$plugin_dir" ]; then
+    log_info "Skipping existing zsh plugin: $plugin_name"
+    return 0
+  fi
+
+  log_info "Installing zsh plugin: $plugin_name"
+  set +e
+  output="$(git clone --depth 1 "$plugin_repo" "$plugin_dir" 2>&1)"
+  status=$?
+  set -e
+
+  if [ "$status" -eq 0 ]; then
+    log_done "Installed zsh plugin: $plugin_name"
+    return 0
+  fi
+
+  if [ -n "$output" ]; then
+    printf '%s\n' "$output" >&2
+  fi
+  log_warn "Failed to install zsh plugin: $plugin_name"
+  add_follow_up "Install $plugin_name manually: $(plugin_clone_command "$plugin_name")"
+  return 1
+}
+
+main() {
+  log_info "Starting zsh plugin installation"
+
+  if ! has_command git; then
+    log_warn "Skipping zsh plugin installation because git is unavailable"
+    add_follow_up "Install zsh-autosuggestions manually: $(plugin_clone_command zsh-autosuggestions)"
+    add_follow_up "Install fast-syntax-highlighting manually: $(plugin_clone_command fast-syntax-highlighting)"
+    print_follow_ups
+    exit 0
+  fi
+
+  mkdir -p "$PLUGINS_DIR"
+
+  install_plugin "zsh-autosuggestions" || true
+  install_plugin "fast-syntax-highlighting" || true
+
+  print_follow_ups
+}
+
+main "$@"

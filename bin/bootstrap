@@ -8,6 +8,7 @@ log_info() { printf '%s\n' "[info] $*"; }
 log_done() { printf '%s\n' "[done] $*"; }
 log_warn() { printf '%s\n' "[warn] $*"; }
 log_fail() { printf '%s\n' "[fail] $*"; }
+is_root() { [ "$(id -u)" -eq 0 ]; }
 
 assert_contains() {
   haystack="$1"
@@ -46,7 +47,7 @@ create_self_test_fixture() {
     "$fixture_root/git" \
     "$fixture_root/local" \
     "$fixture_root/starship" \
-    "$fixture_root/zsh"
+    "$fixture_root/zsh/plugins"
 
   cp "$0" "$fixture_root/bin/bootstrap"
   cat > "$fixture_root/bin/install-packages" <<'EOF'
@@ -55,6 +56,11 @@ printf '%s\n' "Before you finish setup, review these follow-up steps:"
 printf '%s\n' '- If you want your user shell to default to zsh, run: chsh -s "$(command -v zsh)"'
 printf '%s\n' "- If package installation needed elevated privileges, rerun the installer as root: sudo ./bin/install-packages"
 exit 1
+EOF
+  cat > "$fixture_root/bin/install-zsh-plugins" <<'EOF'
+#!/usr/bin/env sh
+printf '%s\n' "[done] Installed zsh plugin: zsh-autosuggestions"
+printf '%s\n' "[done] Installed zsh plugin: fast-syntax-highlighting"
 EOF
   cat > "$fixture_root/local/zsh.local.example" <<'EOF'
 # local zsh overrides
@@ -74,7 +80,12 @@ EOF
 add_newline = false
 EOF
 
-  chmod +x "$fixture_root/bin/bootstrap" "$fixture_root/bin/install-packages"
+  touch "$fixture_root/zsh/plugins/.gitkeep"
+
+  chmod +x \
+    "$fixture_root/bin/bootstrap" \
+    "$fixture_root/bin/install-packages" \
+    "$fixture_root/bin/install-zsh-plugins"
 }
 
 print_shell_follow_up() {
@@ -137,6 +148,8 @@ run_progress_output_self_test() {
   assert_contains "$output" "[done] Linked $tmp_home/.zshrc -> $tmp_fixture/zsh/.zshrc"
   assert_contains "$output" "[done] Linked $tmp_home/.gitconfig -> $tmp_fixture/git/.gitconfig"
   assert_contains "$output" "[done] Linked $tmp_home/.config/starship.toml -> $tmp_fixture/starship/starship.toml"
+  assert_contains "$output" "[done] Installed zsh plugin: zsh-autosuggestions"
+  assert_contains "$output" "[done] Installed zsh plugin: fast-syntax-highlighting"
   assert_contains "$output" 'Before you finish setup, review this follow-up step:'
   assert_contains "$output" '- If you want your user shell to default to zsh, run: chsh -s "$(command -v zsh)"'
 
@@ -173,10 +186,40 @@ EOF
   test -L "$tmp_home/.zshrc"
   test -L "$tmp_home/.gitconfig"
   test -L "$tmp_home/.config/starship.toml"
+  assert_contains "$output" "[done] Installed zsh plugin: zsh-autosuggestions"
+  assert_contains "$output" "[done] Installed zsh plugin: fast-syntax-highlighting"
   assert_contains "$output" "[warn] Package installation reported actionable issues"
   assert_contains "$output" "sudo ./bin/install-packages"
   assert_occurrences "$output" "Before you finish setup, review these follow-up steps:" 1
   assert_occurrences "$output" 'chsh -s "$(command -v zsh)"' 1
+
+  cleanup_dir "$tmp_root"
+  cleanup_dir "$tmp_home"
+  cleanup_dir "$tmp_fixture"
+}
+
+run_root_plugin_skip_self_test() {
+  tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-root.XXXXXX")"
+  tmp_home="$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-home.XXXXXX")"
+  tmp_fixture="$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-fixture.XXXXXX")"
+  create_self_test_fixture "$tmp_fixture"
+
+  mkdir -p "$tmp_root/bin"
+  cat > "$tmp_root/bin/id" <<'EOF'
+#!/usr/bin/env sh
+printf '%s\n' "0"
+EOF
+  chmod +x "$tmp_root/bin/id"
+
+  output="$(
+    PATH="$tmp_root/bin:/usr/bin:/bin" \
+      HOME="$tmp_home" \
+      DOTFILES_DIR_OVERRIDE="$tmp_fixture" \
+      "$tmp_fixture/bin/bootstrap" 2>&1
+  )"
+
+  assert_contains "$output" "[warn] Skipping zsh plugin installation because bootstrap is running as root"
+  assert_contains "$output" "Run ./bin/install-zsh-plugins as your normal user after bootstrap completes"
 
   cleanup_dir "$tmp_root"
   cleanup_dir "$tmp_home"
@@ -190,6 +233,9 @@ run_self_test() {
       ;;
     install-delegation)
       run_install_delegation_self_test
+      ;;
+    root-plugin-skip)
+      run_root_plugin_skip_self_test
       ;;
     *)
       printf '%s\n' "unknown self-test: ${2:-}" >&2
@@ -207,6 +253,12 @@ main() {
   link_file "$DOTFILES_DIR/zsh/.zshrc" "$HOME/.zshrc"
   link_file "$DOTFILES_DIR/git/.gitconfig" "$HOME/.gitconfig"
   link_file "$DOTFILES_DIR/starship/starship.toml" "$HOME/.config/starship.toml"
+  if is_root; then
+    log_warn "Skipping zsh plugin installation because bootstrap is running as root"
+    log_info "Run ./bin/install-zsh-plugins as your normal user after bootstrap completes"
+  else
+    "$DOTFILES_DIR/bin/install-zsh-plugins"
+  fi
 
   if [ "${1:-}" = "--install" ]; then
     if ! "$DOTFILES_DIR/bin/install-packages"; then

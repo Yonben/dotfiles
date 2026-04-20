@@ -4,6 +4,22 @@ if [ -f "$DOTFILES_DIR/local/zsh.local" ]; then
   . "$DOTFILES_DIR/local/zsh.local"
 fi
 
+if [ -f "$DOTFILES_DIR/zsh/aliases.zsh" ]; then
+  . "$DOTFILES_DIR/zsh/aliases.zsh"
+fi
+
+if [ -f "$DOTFILES_DIR/zsh/git-functions.zsh" ]; then
+  . "$DOTFILES_DIR/zsh/git-functions.zsh"
+fi
+
+if [ -f "$DOTFILES_DIR/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh" ]; then
+  . "$DOTFILES_DIR/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh"
+fi
+
+if [ -f "$DOTFILES_DIR/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh" ]; then
+  . "$DOTFILES_DIR/zsh/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh"
+fi
+
 if command -v bat >/dev/null 2>&1; then
   alias cat="bat -pp"
 fi

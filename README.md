@@ -36,6 +36,7 @@ This split is intentional:
 - `sudo ./bin/install-packages` handles system package installation separately, so the bootstrap step does not accidentally write into `/root`.
 
 Avoid running `sudo ./bin/bootstrap --install` unless you specifically want to bootstrap the root user.
+If you do run bootstrap as `root`, it will skip plugin installation and tell you to rerun `./bin/install-zsh-plugins` as your normal user.
 
 ## What The Scripts Do
 
@@ -43,12 +44,13 @@ Avoid running `sudo ./bin/bootstrap --install` unless you specifically want to b
 
 - seeds `local/zsh.local` and `local/gitconfig.local` from their example files when they are missing
 - symlinks the managed config files into `~`
+- installs user-owned `zsh` plugins into `zsh/plugins/` when they are missing
 - prints a follow-up command for setting your default shell to `zsh`
 
 `./bin/bootstrap --install`
 
 - runs the normal bootstrap flow first
-- then calls `./bin/install-packages`
+- then calls `./bin/install-packages` for system packages
 - keeps bootstrap successful even if package installation reports actionable problems
 
 `./bin/install-packages`
@@ -56,6 +58,13 @@ Avoid running `sudo ./bin/bootstrap --install` unless you specifically want to b
 - uses Homebrew on macOS
 - prefers `apt-get` on Linux, with Homebrew as a fallback only when `apt-get` is unavailable
 - prints readable progress logs and a follow-up checklist for anything it does not run automatically
+
+`./bin/install-zsh-plugins`
+
+- runs as your user from `bootstrap`, not under `sudo`
+- installs `zsh-autosuggestions` and `fast-syntax-highlighting` with shallow clones
+- skips plugin directories that already exist instead of updating them in place
+- prints manual `git clone` follow-ups if plugin installation fails
 
 Typical follow-ups include:
 
@@ -78,6 +87,8 @@ Bootstrap seeds these files automatically if they are missing. Edit them locally
 - `local/gitconfig.local.example` -> `local/gitconfig.local`
 
 These local files are ignored by git.
+
+Generated plugin checkouts under `zsh/plugins/` are also ignored by git. Only `zsh/plugins/.gitkeep` is tracked.
 
 ## Backups
 

@@ -1,5 +1,7 @@
 local/gitconfig.local
 local/zsh.local
+zsh/plugins/*
+!zsh/plugins/.gitkeep
 *.bak
 *.backup
 docs/superpowers/plans/

@@ -1,0 +1,5 @@
+alias g='git'
+alias gp='git push'
+alias gl='git pull'
+alias gco='git checkout'
+alias gcb='git checkout -b'
