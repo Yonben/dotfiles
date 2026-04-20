@@ -46,13 +46,20 @@ assert_occurrences() {
   return 1
 }
 
+emit_follow_up_checklist_self_test_output() {
+  FOLLOW_UPS_FILE="$(mktemp "${TMPDIR:-/tmp}/install-packages-follow-ups.XXXXXX")"
+  trap 'rm -f "$FOLLOW_UPS_FILE"' EXIT HUP INT TERM
+  add_shell_follow_up
+  add_universe_follow_up
+  add_starship_follow_up
+  add_root_rerun_follow_up
+  print_follow_ups
+}
+
 run_self_test() {
   case "${2:-}" in
     follow-up-checklist)
-      output="$(
-        INSTALL_PACKAGES_SELF_TEST_SCENARIO="follow-up-checklist" \
-          sh "$0" 2>&1 || true
-      )"
+      output="$(emit_follow_up_checklist_self_test_output 2>&1 || true)"
       assert_contains "$output" "Before you finish setup, review these follow-up steps:"
       assert_occurrences "$output" "Before you finish setup, review these follow-up steps:" 1
       assert_contains "$output" "- If you want your user shell to default to zsh, run: chsh -s \"\$(command -v zsh)\""
@@ -62,16 +69,24 @@ run_self_test() {
       assert_not_contains "$output" "Follow-up:"
       return 0
       ;;
+    env-leak-ignored)
+      output="$(
+        INSTALL_PACKAGES_SELF_TEST_SCENARIO="follow-up-checklist" \
+          PATH="/usr/bin:/bin" \
+          sh "$0" 2>&1 || true
+      )"
+      assert_contains "$output" "[fail] Automatic package installation is unavailable: Homebrew was not found on macOS"
+      assert_contains "$output" "- Install Homebrew from https://brew.sh, then rerun ./bin/install-packages to install the required packages automatically"
+      assert_not_contains "$output" "- If apt still cannot find required packages, enable the Ubuntu universe repository, refresh apt metadata, and rerun the installer: sudo add-apt-repository -y universe && sudo apt update"
+      assert_not_contains "$output" "- If package installation needed elevated privileges, rerun the installer as root: sudo ./bin/install-packages"
+      assert_not_contains "$output" "- If you want the prompt theme now, install starship manually: curl -sS https://starship.rs/install.sh | sh"
+      return 0
+      ;;
   esac
 
   printf '%s\n' "unknown self-test: ${2:-}" >&2
   return 1
 }
-
-if [ "${1:-}" = "--self-test" ]; then
-  run_self_test "$@"
-  exit $?
-fi
 
 select_package_manager() {
   if is_macos && has_command brew; then
@@ -144,21 +159,12 @@ finish() {
   exit "$status"
 }
 
-run_self_test_scenario() {
-  case "${INSTALL_PACKAGES_SELF_TEST_SCENARIO:-}" in
-    follow-up-checklist)
-      add_shell_follow_up
-      add_universe_follow_up
-      add_starship_follow_up
-      add_root_rerun_follow_up
-      print_follow_ups
-      exit 0
-      ;;
-  esac
-}
+if [ "${1:-}" = "--self-test" ]; then
+  run_self_test "$@"
+  exit $?
+fi
 
 add_shell_follow_up
-run_self_test_scenario
 
 install_brew_package() {
   package="$1"
