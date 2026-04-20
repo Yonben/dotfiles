@@ -9,7 +9,7 @@ if command -v bat >/dev/null 2>&1; then
 fi
 
 if command -v eza >/dev/null 2>&1; then
-  alias ls="eza --color=always --long --git --icons=always"
+  alias ls="eza --color=always --long --git --no-filesize --icons=always --no-time --no-user --no-permissions"
 fi
 
 if command -v fzf >/dev/null 2>&1; then
